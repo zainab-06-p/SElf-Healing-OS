@@ -1,0 +1,58 @@
+#!/usr/bin/env bpftrace
+/*
+ * Interrupt subsystem probe (Step 1 of the Self-Healing OS plan).
+ *
+ * Tracepoints: irq:irq_handler_entry, irq:irq_handler_exit
+ *
+ * IRQ handling latency is measured entry -> exit, keyed per (irq, cpu) so
+ * nested/handlers on different CPUs do not clobber each other.
+ *
+ * Emitted metrics (one row each, per interval):
+ *   irq_handled_total    IRQ handler exits
+ *   irq_lat_avg_us       avg handler duration
+ *   irq_lat_max_us       max handler duration
+ *   irq_lat_cnt          latency samples in this window
+ *   irq_handled_per_line top-5 IRQs by handler name (map)
+ */
+
+tracepoint:irq:irq_handler_entry
+{
+    @irq_ts[args->irq, cpu] = nsecs;
+    @irq_per_line[str(args->name)] = count();
+}
+
+tracepoint:irq:irq_handler_exit
+{
+    @irq_handled = count();
+
+    $s = @irq_ts[args->irq, cpu];
+    if ($s > 0) {
+        $lat = (uint64)(nsecs - $s) / 1000;    /* us */
+        @irq_lat_sum = (uint64)(@irq_lat_sum + $lat);
+        @irq_lat_cnt = count();
+        if ($lat > @irq_lat_max) {
+            @irq_lat_max = $lat;
+        }
+        @irq_ts[args->irq, cpu] = 0;
+    }
+}
+
+interval:s:5
+{
+    printf("__snapshot__=1\n");
+    $h = @irq_handled;
+    printf("irq_handled_total=%llu\n", $h);
+    $n = @irq_lat_cnt;
+    printf("irq_lat_cnt=%llu\n", $n);
+    if ($n > 0) {
+        printf("irq_lat_avg_us=%llu\n", (uint64)@irq_lat_sum / (uint64)$n);
+        printf("irq_lat_max_us=%llu\n", @irq_lat_max);
+    }
+    print(@irq_per_line, 5);
+    printf("__snapshot_end__=1\n");
+    clear(@irq_handled);
+    clear(@irq_lat_sum);
+    clear(@irq_lat_cnt);
+    clear(@irq_lat_max);
+    clear(@irq_per_line);
+}

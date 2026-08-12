@@ -1,0 +1,68 @@
+#!/usr/bin/env bpftrace
+/*
+ * Block I/O subsystem probe (Step 1 of the Self-Healing OS plan).
+ *
+ * Tracepoints: block:block_rq_issue, block:block_rq_complete
+ *
+ * I/O latency is measured issue -> complete, matched per (dev, sector).
+ *
+ * Emitted metrics (one row each, per interval):
+ *   blk_io_ops_total      completed I/O requests
+ *   blk_io_errors         completed requests with error != 0
+ *   blk_bytes_total       sum of bytes transferred
+ *   blk_io_lat_avg_us     avg issue -> complete latency
+ *   blk_io_lat_max_us     max issue -> complete latency
+ *   blk_io_lat_cnt        latency samples in this window
+ *   blk_io_ops_per_dev    top-5 I/O by device (map; key = dev_t number, decoded by collector)
+ */
+
+tracepoint:block:block_rq_issue
+{
+    @io_start[args->dev, args->sector] = nsecs;
+}
+
+tracepoint:block:block_rq_complete
+{
+    @blk_io_ops = count();
+    @blk_bytes = (uint64)(@blk_bytes + (uint64)args->nr_sector * 512);
+    if (args->error != 0) {
+        @blk_errors = count();
+    }
+    @blk_per_dev[args->dev] = count();
+
+    $s = @io_start[args->dev, args->sector];
+    if ($s > 0) {
+        $lat = (uint64)(nsecs - $s) / 1000;    /* us */
+        @blk_lat_sum = (uint64)(@blk_lat_sum + $lat);
+        @blk_lat_cnt = count();
+        if ($lat > @blk_lat_max) {
+            @blk_lat_max = $lat;
+        }
+        @io_start[args->dev, args->sector] = 0;
+    }
+}
+
+interval:s:5
+{
+    printf("__snapshot__=1\n");
+    $ops = @blk_io_ops;
+    printf("blk_io_ops_total=%llu\n", $ops);
+    $e = @blk_errors;
+    printf("blk_io_errors=%llu\n", $e);
+    printf("blk_bytes_total=%llu\n", @blk_bytes);
+    $n = @blk_lat_cnt;
+    printf("blk_io_lat_cnt=%llu\n", $n);
+    if ($n > 0) {
+        printf("blk_io_lat_avg_us=%llu\n", (uint64)@blk_lat_sum / (uint64)$n);
+        printf("blk_io_lat_max_us=%llu\n", @blk_lat_max);
+    }
+    print(@blk_per_dev, 5);
+    printf("__snapshot_end__=1\n");
+    clear(@blk_io_ops);
+    clear(@blk_errors);
+    clear(@blk_bytes);
+    clear(@blk_lat_sum);
+    clear(@blk_lat_cnt);
+    clear(@blk_lat_max);
+    clear(@blk_per_dev);
+}

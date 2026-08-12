@@ -1,0 +1,56 @@
+#!/usr/bin/env bpftrace
+/*
+ * Memory subsystem probe (Step 1 of the Self-Healing OS plan).
+ *
+ * Tracepoints: exceptions:page_fault_user, exceptions:page_fault_kernel,
+ *              oom:mark_victim
+ *
+ * Note: on kernel 7.0 the page-fault tracepoints moved from mm: to exceptions:.
+ *       oom_kill_process was replaced by oom:mark_victim (fires when a process
+ *       is selected as the OOM victim).
+ *
+ * Emitted metrics (one row each, per interval):
+ *   mem_page_faults_user      user-mode page faults
+ *   mem_page_faults_kernel    kernel-mode page faults
+ *   mem_page_faults_total     user + kernel
+ *   mem_oom_kills             OOM victim selections
+ *   mem_page_faults_per_comm  top-5 faults by process (map)
+ *   mem_oom_kills_per_comm    OOM victims by process (map)
+ */
+
+tracepoint:exceptions:page_fault_user
+{
+    @pgfault_user = count();
+    @pf_per_comm[comm] = count();
+}
+
+tracepoint:exceptions:page_fault_kernel
+{
+    @pgfault_kernel = count();
+}
+
+tracepoint:oom:mark_victim
+{
+    @oom_kills = count();
+    @oom_per_comm[comm] = count();
+}
+
+interval:s:5
+{
+    printf("__snapshot__=1\n");
+    $u = @pgfault_user;
+    $k = @pgfault_kernel;
+    $o = @oom_kills;
+    printf("mem_page_faults_user=%llu\n", $u);
+    printf("mem_page_faults_kernel=%llu\n", $k);
+    printf("mem_page_faults_total=%llu\n", $u + $k);
+    printf("mem_oom_kills=%llu\n", $o);
+    print(@pf_per_comm, 5);
+    print(@oom_per_comm, 5);
+    printf("__snapshot_end__=1\n");
+    clear(@pgfault_user);
+    clear(@pgfault_kernel);
+    clear(@oom_kills);
+    clear(@pf_per_comm);
+    clear(@oom_per_comm);
+}

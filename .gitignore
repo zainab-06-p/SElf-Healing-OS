@@ -1,0 +1,33 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# Pytest cache
+.pytest_cache/
+
+# SQLite databases (runtime data)
+*.db
+*.db-shm
+*.db-wal
+
+# Log files (runtime data)
+*.log
+
+# Stress-ng temp dirs
+tmp-stress-ng-*/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

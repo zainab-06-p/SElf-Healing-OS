@@ -1,0 +1,56 @@
+#!/usr/bin/env bpftrace
+/*
+ * Diagnostic histogram probe (manual verification / milestone check only).
+ *
+ * Confirms that in-kernel histogram aggregation works for the three latency
+ * dimensions before the compact JSON collection scripts are used:
+ *   sched_runq_latency    wakeup -> on-CPU latency (us)
+ *   blk_io_latency        issue -> complete latency (us)
+ *   irq_handler_latency   handler entry -> exit latency (us)
+ *
+ * Run directly (not via the collector):
+ *   sudo bpftrace diagnostics/histograms.bt
+ */
+
+tracepoint:sched:sched_waking { @wake_ts[args->pid] = nsecs; }
+
+tracepoint:sched:sched_switch
+{
+    $wts = @wake_ts[args->next_pid];
+    if ($wts > 0) {
+        @runq_lat_hist = hist((uint64)(nsecs - $wts) / 1000);
+        @wake_ts[args->next_pid] = 0;
+    }
+}
+
+tracepoint:block:block_rq_issue { @io_start[args->dev, args->sector] = nsecs; }
+
+tracepoint:block:block_rq_complete
+{
+    $s = @io_start[args->dev, args->sector];
+    if ($s > 0) {
+        @blk_lat_hist = hist((uint64)(nsecs - $s) / 1000);
+        @io_start[args->dev, args->sector] = 0;
+    }
+}
+
+tracepoint:irq:irq_handler_entry { @irq_ts[args->irq, cpu] = nsecs; }
+
+tracepoint:irq:irq_handler_exit
+{
+    $s = @irq_ts[args->irq, cpu];
+    if ($s > 0) {
+        @irq_lat_hist = hist((uint64)(nsecs - $s) / 1000);
+        @irq_ts[args->irq, cpu] = 0;
+    }
+}
+
+interval:s:10
+{
+    print(@runq_lat_hist);
+    print(@blk_lat_hist);
+    print(@irq_lat_hist);
+    clear(@runq_lat_hist);
+    clear(@blk_lat_hist);
+    clear(@irq_lat_hist);
+}

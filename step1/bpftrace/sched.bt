@@ -1,0 +1,71 @@
+#!/usr/bin/env bpftrace
+/*
+ * Scheduling subsystem probe (Step 1 of the Self-Healing OS plan).
+ *
+ * Tracepoints: sched_waking, sched_switch
+ *
+ * All aggregation happens IN-KERNEL via BPF maps; userspace only receives
+ * a compact JSON snapshot every INTERVAL seconds via bpftrace's -f json.
+ *
+ * Emitted metrics (one row each, per interval):
+ *   sched_ctx_switches           total context switches
+ *   sched_preemptions            switches where prev task was still runnable (preemption proxy)
+ *   sched_runq_lat_avg_us        avg wakeup -> on-CPU latency
+ *   sched_runq_lat_max_us        max wakeup -> on-CPU latency
+ *   sched_runq_lat_cnt           number of latency samples in this window
+ *   sched_switches_per_comm      top-5 break down of context switches by process (map)
+ *
+ * Snapshot framing: __snapshot__=1 starts a frame, __snapshot_end__=1 closes it.
+ * The collector only persists rows that arrive inside a frame, so bpftrace's
+ * final END map dump is ignored.
+ */
+
+tracepoint:sched:sched_waking
+{
+    @wake_ts[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch
+{
+    @ctx_switches = count();
+
+    if (args->prev_state == 0) {
+        @preemptions = count();
+    }
+
+    @sw_per_comm[args->prev_comm] = count();
+
+    $wts = @wake_ts[args->next_pid];
+    if ($wts > 0) {
+        $lat = (uint64)(nsecs - $wts) / 1000;  /* us */
+        @runq_lat_sum = (uint64)(@runq_lat_sum + $lat);
+        @runq_lat_cnt = count();
+        if ($lat > @runq_lat_max) {
+            @runq_lat_max = $lat;
+        }
+        @wake_ts[args->next_pid] = 0;
+    }
+}
+
+interval:s:5
+{
+    printf("__snapshot__=1\n");
+    $c = @ctx_switches;
+    printf("sched_ctx_switches=%llu\n", $c);
+    $p = @preemptions;
+    printf("sched_preemptions=%llu\n", $p);
+    $n = @runq_lat_cnt;
+    printf("sched_runq_lat_cnt=%llu\n", $n);
+    if ($n > 0) {
+        printf("sched_runq_lat_avg_us=%llu\n", (uint64)@runq_lat_sum / (uint64)$n);
+        printf("sched_runq_lat_max_us=%llu\n", @runq_lat_max);
+    }
+    print(@sw_per_comm, 5);
+    printf("__snapshot_end__=1\n");
+    clear(@ctx_switches);
+    clear(@preemptions);
+    clear(@runq_lat_sum);
+    clear(@runq_lat_cnt);
+    clear(@runq_lat_max);
+    clear(@sw_per_comm);
+}
