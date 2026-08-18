@@ -1,0 +1,16 @@
+# Self-Healing OS — runtime dependencies
+#
+# Install with:   pip install -r requirements.txt
+# (PyQt6/pyqtgraph are only needed for the Step 3 dashboard; the pipeline and
+#  brain run headless with just numpy + scikit-learn.)
+
+numpy
+scikit-learn
+
+# Step 3 observability dashboard (step3/src/app.py)
+PyQt6
+pyqtgraph
+
+# Optional: second XAI layer (step2/src/explain.py) - the system degrades
+# gracefully to the built-in Isolation-Forest attribution when absent.
+# shap

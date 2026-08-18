@@ -65,8 +65,14 @@ MIN_TRAIN_LIVE = 50         # windows needed before live scoring begins
 RETRAIN_EVERY = 200         # trigger retraining after this many new windows
 RETRAIN_HISTORY = 1000      # sliding training window size (windows)
 HOLD_OUT_N = 50             # recent known-normal windows reserved for validation
-VALIDATE_MIN_FLAG = 0.01    # sane proportion of held-out windows flagged
-VALIDATE_MAX_FLAG = 0.05    # sanity band is 1-5%
+# A healthy model trained on recent *normal* windows flags ~0% of a normal
+# holdout (calling it normal is correct, not degenerate), so flag-rate 0 must
+# be accepted. The gate only rejects a candidate that cries wolf on normal
+# data (flag rate above VALIDATE_MAX_FLAG) or that no longer detects the
+# system's own past incidents (detection rate below VALIDATE_MIN_DETECT).
+VALIDATE_MIN_FLAG = 0.0     # floor on held-out normal-window flag rate (0 is healthy)
+VALIDATE_MAX_FLAG = 0.05    # ceiling on held-out normal-window flag rate
+VALIDATE_MIN_DETECT = 0.3   # candidate must still flag >= 30% of past incidents
 RETRAIN_MIN_TRAIN = 30      # minimum usable training rows before a retrain
 
 # ---------------------------------------------------------------------------
@@ -96,6 +102,11 @@ TREND_PUSH_ACTION_CONF = 0.95  # trend warning + conf >= this -> action-grade
 # both sides; it also tolerates slow baseline drift without false positives.
 MAG_SUGGEST = 12.0         # any core metric >= 12 sigma above its baseline
 MAG_ACTION = 20.0          # sustained >= 20 sigma -> action-grade
+# A confidence-driven suggestion must also be *currently* deviant (>= this many
+# sigma on a live `cur` metric). Without this, lag/rolling features keep the
+# percentile score elevated for ~a minute after a fault heals, so the alarm
+# would linger on an already-recovered system instead of clearing.
+MAG_CONFIRM = 2.0
 
 
 # ---------------------------------------------------------------------------

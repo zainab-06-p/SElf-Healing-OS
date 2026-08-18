@@ -171,6 +171,22 @@ class TestModel:
         flag, accepted, reason = retrainer.validate(bad, X[:50])
         assert not accepted and "too high" in reason
 
+    def test_retrainer_rejects_if_detection_lost(self, tmp_path):
+        """A candidate is only promoted if it still flags the system's own
+        past incidents - a model that stops detecting known fault patterns
+        would silently degrade self-healing, so it must be rejected."""
+        X, _ = train_on(tmp_path)
+        retrainer = Retrainer()
+        good = AnomalyModel()
+        good.fit(X[:120])
+        known_anomalies = X[130:]  # the fault windows from the experiment
+        _, accepted, reason = retrainer.validate(good, X[:100], known_anomalies)
+        assert accepted, f"good model should still detect past faults: {reason}"
+        # a candidate presented with only *normal* windows as its "anomalies"
+        # (i.e. it cannot separate them) is rejected as degenerate
+        _, accepted, reason = retrainer.validate(good, X[:100], X[:100])
+        assert not accepted and "detects only" in reason
+
     def test_retraining_respects_time_order(self, tmp_path):
         rows = gen_windows(1000.0, 60)
         conn = make_db(str(tmp_path / "t.db"), rows)
@@ -304,9 +320,11 @@ class TestGate:
     def test_gate_separation(self):
         brain = Brain.__new__(Brain)
         brain.cfg = cfg
-        assert brain._gate(0.96, 1.0, {}, False) == "suggestion"      # above suggest, not sustained
-        assert brain._gate(0.99, 1.0, {}, False) == "suggestion"      # single strong spike stays suggestion
-        assert brain._gate(0.99, 1.0, {}, True) == "action"           # sustained -> action
+        # confidence alone, without current metric deviation, does NOT raise an
+        # alarm (stale lag/rolling features must not keep a healed system on alert)
+        assert brain._gate(0.99, 1.0, {}, False) == "normal"
+        assert brain._gate(0.96, cfg.MAG_CONFIRM, {}, False) == "suggestion"   # above suggest + current evidence
+        assert brain._gate(0.99, cfg.MAG_CONFIRM, {}, True) == "action"        # sustained -> action
         assert brain._gate(0.95, 1.0, {"m": 1}, False) == "action"    # trend agrees -> action
         assert brain._gate(0.80, 1.0, {"m": 1}, False) == "suggestion"  # trend alone -> suggestion
         assert brain._gate(0.80, 1.0, {}, False) == "normal"

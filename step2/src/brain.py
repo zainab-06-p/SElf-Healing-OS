@@ -106,6 +106,26 @@ class Brain:
             out.append((st, x))
         return out[-self.cfg.RETRAIN_HISTORY:]
 
+    def _anomalous_rows_from_table(self):
+        """Feature vectors of windows that were flagged as incidents in the
+        past - used to validate that a retrained candidate still detects the
+        system's own known fault patterns (models that lose that ability are
+        rejected, so self-healing never silently degrades)."""
+        rows = self.conn.execute(
+            "SELECT start_ts, feature_vector FROM windows ORDER BY start_ts"
+        ).fetchall()
+        out = []
+        for st, fv in rows:
+            if st not in self.flagged_ts:
+                continue
+            try:
+                vec = json.loads(fv)
+                x = [float(vec[f]) for f in self.cfg.FEATURE_ORDER]
+            except (KeyError, TypeError, ValueError):
+                continue
+            out.append((st, x))
+        return out[-self.cfg.RETRAIN_HISTORY:]
+
     def _try_initial_train(self):
         if self.model.model is not None:
             return False
@@ -129,7 +149,10 @@ class Brain:
 
     def _maybe_retrain(self):
         normal = self._normal_rows_from_table()
-        candidate, validation = self.retrainer.retrain(normal, self.cfg.FEATURE_ORDER)
+        anomalous = self._anomalous_rows_from_table()
+        candidate, validation = self.retrainer.retrain(
+            normal, self.cfg.FEATURE_ORDER, anomalous
+        )
         if candidate is not None and validation.get("accepted"):
             self.model = candidate
             self._log(f"retrained and promoted model v{candidate.version}")
@@ -142,7 +165,14 @@ class Brain:
             return "action"
         if warnings and conf >= self.cfg.TREND_PUSH_ACTION_CONF:
             return "action"
-        if warnings or conf >= self.cfg.SUGGEST_CONF or mag >= self.cfg.MAG_SUGGEST:
+        # A confidence-driven suggestion is only raised while the metric is
+        # still actually deviant in the present (MAG_CONFIRM). Once the current
+        # value returns to baseline the alarm clears immediately, even though
+        # lag/rolling features may carry the fault's memory for ~a minute -
+        # otherwise a recovered system keeps alarming (see MAG_CONFIRM).
+        current_evidence = mag >= self.cfg.MAG_CONFIRM
+        if warnings or (conf >= self.cfg.SUGGEST_CONF and current_evidence) \
+                or mag >= self.cfg.MAG_SUGGEST:
             return "suggestion"
         return "normal"
 

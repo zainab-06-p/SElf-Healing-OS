@@ -7,8 +7,11 @@ Wraps sklearn's IsolationForest with:
     than a hard-coded number,
   * per-feature mean/std statistics (used for explanations and for the
     z-scored incident vectors used by historical-similarity lookup),
-  * a validation gate used before promoting a retrained model: it must flag a
-    sane proportion (1-5%) of recent known-normal held-out windows.
+  * a validation gate used before promoting a retrained model. A candidate is
+    promoted only if it (a) does not cry wolf on recent known-normal held-out
+    windows and (b) still detects the system's own past incidents. Flagging ~0%
+    of a *normal* holdout is healthy (the model calls normal data normal), so
+    the gate no longer rejects low flag rates - it rejects high ones.
 """
 
 import json
@@ -121,22 +124,35 @@ class Retrainer:
     def __init__(self, cfg_=None):
         self.cfg = cfg_ or cfg
 
-    def validate(self, model, X_holdout):
-        """Return (flag_rate, accepted, reason) for a candidate model."""
+    def validate(self, model, X_holdout, X_anomalous=None):
+        """Return (flag_rate, accepted, reason) for a candidate model.
+
+        Rejects candidates that flag too many known-normal held-out windows
+        (cries wolf) or that fail to detect the system's own past incidents
+        (degenerate - would stop self-healing). Flagging 0% of normal held-out
+        windows is healthy and is therefore accepted.
+        """
         if len(X_holdout) == 0:
             return 0.0, False, "no held-out windows available"
         pred = model.predict(X_holdout)
         flag_rate = float(np.mean(pred == -1))
-        lo, hi = self.cfg.VALIDATE_MIN_FLAG, self.cfg.VALIDATE_MAX_FLAG
-        if lo <= flag_rate <= hi:
-            return flag_rate, True, f"flag rate {flag_rate:.3f} within [{lo}, {hi}]"
+        hi = self.cfg.VALIDATE_MAX_FLAG
         if flag_rate > hi:
             return flag_rate, False, f"flag rate {flag_rate:.3f} too high (> {hi})"
-        return flag_rate, False, f"flag rate {flag_rate:.3f} too low (< {lo})"
+        if X_anomalous is not None and len(X_anomalous) > 0:
+            det_rate = float(np.mean(model.predict(X_anomalous) == -1))
+            lo_det = self.cfg.VALIDATE_MIN_DETECT
+            if det_rate < lo_det:
+                return flag_rate, False, (
+                    f"detects only {det_rate:.3f} of known anomalies "
+                    f"(< {lo_det}) - would stop recovering past fault patterns"
+                )
+        return flag_rate, True, f"flag rate {flag_rate:.3f} within sane band"
 
-    def retrain(self, normal_windows, feature_order=None):
+    def retrain(self, normal_windows, feature_order=None, anomalous_windows=None):
         """Train a candidate on recent known-normal windows (chronological),
-        validate against the newest known-normal held-out slice, and return
+        validate against the newest known-normal held-out slice plus (when
+        available) the system's past incident windows, and return
         (candidate, validation_dict) without mutating the active model."""
         feature_order = feature_order or list(self.cfg.FEATURE_ORDER)
         rows = sorted(normal_windows, key=lambda r: r[0])  # by start_ts
@@ -150,12 +166,14 @@ class Retrainer:
 
         X_train = np.array([r[1] for r in train_rows])
         X_hold = np.array([r[1] for r in holdout])
+        X_anom = np.array([r[1] for r in anomalous_windows]) if anomalous_windows else None
         candidate = AnomalyModel(self.cfg)
         candidate.fit(X_train, feature_order)
-        flag_rate, accepted, reason = self.validate(candidate, X_hold)
+        flag_rate, accepted, reason = self.validate(candidate, X_hold, X_anom)
         validation = {
             "n_train": int(len(X_train)),
             "n_holdout": int(len(X_hold)),
+            "n_anomalous": int(len(X_anom)) if X_anom is not None else 0,
             "flag_rate": round(flag_rate, 4),
             "accepted": accepted,
             "reason": reason,

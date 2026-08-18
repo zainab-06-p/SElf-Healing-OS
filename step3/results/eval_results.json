@@ -1,0 +1,50 @@
+{
+  "cpu": {
+    "tp": 20,
+    "fp": 3,
+    "fn": 0,
+    "tn": 27,
+    "precision": 0.8696,
+    "recall": 1.0,
+    "f1": 0.9302,
+    "fpr": 0.1,
+    "false_positives_per_hour": 72.0,
+    "time_to_detection_s": [
+      0.0
+    ],
+    "n_windows": 50,
+    "n_incidents": 23
+  },
+  "io": {
+    "tp": 20,
+    "fp": 2,
+    "fn": 0,
+    "tn": 28,
+    "precision": 0.9091,
+    "recall": 1.0,
+    "f1": 0.9524,
+    "fpr": 0.0667,
+    "false_positives_per_hour": 48.0,
+    "time_to_detection_s": [
+      0.0
+    ],
+    "n_windows": 50,
+    "n_incidents": 22
+  },
+  "memory": {
+    "tp": 20,
+    "fp": 1,
+    "fn": 0,
+    "tn": 29,
+    "precision": 0.9524,
+    "recall": 1.0,
+    "f1": 0.9756,
+    "fpr": 0.0333,
+    "false_positives_per_hour": 24.0,
+    "time_to_detection_s": [
+      0.0
+    ],
+    "n_windows": 50,
+    "n_incidents": 21
+  }
+}

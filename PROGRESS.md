@@ -1,8 +1,8 @@
 # 🩺 Self-Healing OS — Project Progress Report
 
-> **Last Updated:** August 12, 2026  
+> **Last Updated:** August 18, 2026  
 > **Repo:** [github.com/zainab-06-p/SElf-Healing-OS](https://github.com/zainab-06-p/SElf-Healing-OS)  
-> **Overall Completion: ~65%** — Steps 1 & 2 fully implemented; Step 3 (Desktop App + Evaluation) not yet started.
+> **Overall Completion: ~88%** — Steps 1 & 2 fully implemented; Step 3 (PyQt6 dashboard + formal evaluation) built and verified. Remaining: live-VM hardware evaluation numbers + demo rehearsal polish.
 
 ---
 
@@ -203,7 +203,7 @@ Example output: *"Anomaly detected (confidence 99%). Run-queue latency is 13.3x 
 
 ---
 
-### 2.10 Tests — `step2/tests/test_step2.py` (20 tests total)
+### 2.10 Tests — `step2/tests/test_step2.py` (21 tests total)
 
 | Test Area | Tests | Status |
 |-----------|-------|--------|
@@ -211,6 +211,7 @@ Example output: *"Anomaly detected (confidence 99%). Run-queue latency is 13.3x 
 | Feature response to CPU fault (scheduler latency 3x above normal) | 1 test | ✅ Done |
 | Isolation Forest scores (fault windows score higher than normal) | 1 test | ✅ Done |
 | Retrainer: accepts a good model, rejects contamination=0.5 model | 1 test | ✅ Done |
+| Retrainer: rejects a candidate that loses detection of past incidents | 1 test | ✅ Done |
 | Retraining triggers and logs to model_versions table | 2 tests | ✅ Done |
 | Trend layer: warns on rising signal, silent on flat signal | 1 test | ✅ Done |
 | Explainer: native attribution ranks true driver, natural-language output | 1 test | ✅ Done |
@@ -226,45 +227,83 @@ Example output: *"Anomaly detected (confidence 99%). Run-queue latency is 13.3x 
 
 ---
 
-## STEP 3 — Desktop Application + Evaluation — STATUS: NOT STARTED (0%)
+## STEP 3 — Desktop Application + Evaluation — STATUS: MOSTLY COMPLETE (~90%)
 
 > Goal: Make the system demoable and produce real, defensible evaluation numbers.
 
-### 3.1 Desktop Application (Task-Manager-style, 5 tabs)
+### 3.1 Desktop Application (`step3/src/app.py`) — PyQt6 + pyqtgraph, 5 tabs
 
 | Tab | Feature | Status |
 |-----|---------|--------|
-| **Live View** | Real-time stream of eBPF metrics refreshed every 1–5s | ❌ Not built |
-| **Metrics & Visualization** | Time-series charts per metric with trend lines; before/after of self-heal events | ❌ Not built |
-| **History** | Incident log — detected, action taken, success/failure, rollback used; audit trail | ❌ Not built |
-| **AI Views / Suggestions** | Anomaly score, top features, natural-language explanation, similar past incidents, manual-approval actions | ❌ Not built |
-| **Popups / Notifications** | Real-time alerts when the system detects or resolves an issue with plain-language explanation | ❌ Not built |
+| **Live View** | Real-time stream of eBPF metrics refreshed every 2s | ✅ Built & tested |
+| **Metrics & Visualization** | Time-series chart per metric (rolling 60s window, dropdown selector) | ✅ Built & tested |
+| **History** | Incident log — score, XAI explanation, action, outcome (green=resolved / red=failed), rollback | ✅ Built & tested |
+| **AI Insights & Suggestions** | Threat gauge, natural-language XAI, decision-gate state, manual-action approval button | ✅ Built & tested |
+| **System & Controls** | Observer/Autonomous mode toggle, action threshold slider, clear-incident-history | ✅ Built & tested |
+| **Real-time Popups** | System-tray popups + in-app notification feed for new incidents & resolved/failed outcomes | ✅ Added |
 
-Technology choice not yet made: Electron (web stack) vs Python/Qt.
-
----
+Technology: PyQt6 + pyqtgraph (reads the same SQLite DB; no extra logic).
+`pyqtgraph` is optional at runtime — the dashboard degrades gracefully with a
+clear message if it is missing. Dependencies pinned in `requirements.txt`.
 
 ### 3.2 Formal Evaluation (Precision / Recall / F1)
 
 | Evaluation Task | Status |
 |----------------|--------|
-| Run fault-injection suite and label ground-truth windows | ❌ Not done |
-| Compute Precision, Recall, F1 | ❌ Not done |
-| Measure Time-to-Detection (seconds before fault matures that system flags it) | ❌ Not done |
-| Measure False-Positive Rate on normal workloads | ❌ Not done |
-| Document results as evidence table for judges | ❌ Not done |
+| Fault-injection suite with ground-truth-labelled windows | ✅ Harness `step3/scripts/evaluate.py` |
+| Compute Precision, Recall, F1 | ✅ Done (see below) |
+| Measure Time-to-Detection | ✅ Done (all faults caught on first window = "early") |
+| Measure False-Positive Rate on normal workloads | ✅ Done |
+| Document results | ✅ `step3/EVALUATION.md` + `step3/results/eval_results.json` |
 
----
+Synthetic fault-injection results (replay over labelled corpus, 120 normal + 20
+fault + 10 recovery windows per class):
+
+| Fault | Precision | Recall | F1 | Time-to-Detection | FPR |
+|-------|-----------|--------|-----|-------------------|-----|
+| cpu (CPU starvation)    | 0.870 | 1.000 | 0.930 | early (+0s) | 0.100 |
+| io (I/O degradation)    | 0.909 | 1.000 | 0.952 | early (+0s) | 0.067 |
+| memory (memory-pressure) | 0.952 | 1.000 | 0.976 | early (+0s) | 0.033 |
+
+The same harness reads live `__phase__` markers written by
+`run_experiment.sh`, so hardware numbers can be produced on the deployment VM
+with no code change (`python3 step3/scripts/evaluate.py --db
+step1/data/experiment.db`).
 
 ### 3.3 Demo Preparation
 
 | Demo Scenario | Status |
 |--------------|--------|
-| Memory leak process -> memory-pressure detection + process restart | ❌ Not rehearsed |
-| stress-ng / fork bomb -> scheduler-latency detection + priority throttling | ❌ Not rehearsed |
-| Throttled disk load -> I/O-degradation detection | ❌ Not rehearsed |
-| Dummy kernel module -> IRQ-anomaly detection (currently suggestion-only) | ❌ Not rehearsed |
-| Retraining before/after comparison prepared as static artifact | ❌ Not prepared |
+| Memory leak process -> memory-pressure detection + process restart | ✅ Rehearsed in E2E; restart action unit-tested |
+| CPU hog / stress-ng -> scheduler-latency detection + priority throttling | ✅ Rehearsed in E2E; renice + rollback unit-tested (incl. privileged) |
+| Throttled disk load -> I/O-degradation detection + ionice | ✅ Rehearsed in E2E; ionice action unit-tested |
+| IRQ anomaly -> suggestion-only (no automated module reload) | ⚠️ Suggestion-only by design |
+| Retraining before/after comparison | ✅ Retraining loop verified on real DB (see fixes below) |
+
+---
+
+## Fixes & Improvements Logged (August 18, 2026)
+
+1. **Retraining validation gate bug fixed.** The gate required a retrained model
+   to flag 1–5% of a *known-normal* holdout, but a healthy model flags ~0% of
+   normal data — so every retrain was rejected (`model_versions` v2/v3 in the
+   DB both logged `flag rate 0.000 too low`). The gate now accepts a 0% normal
+   flag rate and instead rejects candidates that (a) cry wolf on normal data
+   (`flag rate > 5%`) or (b) fail to re-detect the system's own past incidents
+   (must flag ≥30% of them). Verified on production data: the candidate is now
+   accepted and still detects 66.7% of the 75 stored incidents.
+2. **Decision-gate "stale alarm" bug fixed.** Confidence-driven alarms are now
+   confirmed against the *current* metric state (`MAG_CONFIRM`, 2σ on a live
+   `cur` feature). Previously, lag/rolling features kept the anomaly score
+   elevated for ~a minute after a fault healed, so a recovered system kept
+   alarming. In the synthetic evaluation this cut false positives by ~70% (e.g.
+   CPU FPs 10→3, FPR 0.33→0.10) without missing a single fault.
+3. **Step 3 dashboard robustness.** `pyqtgraph` is now an optional runtime
+   dependency (graceful degradation + in-UI message); real-time system-tray
+   popups + in-app notification feed added (plan §2.9/§3.1 popups requirement).
+4. **Formal evaluation harness added** (`step3/scripts/evaluate.py`).
+5. **`requirements.txt` added** and doc paths corrected (`UI_Testing.md` now
+   points at `step1/src/collector.py`).
 
 ---
 
@@ -274,18 +313,27 @@ Technology choice not yet made: Electron (web stack) vs Python/Qt.
 |------|-------------|------------|
 | Step 1 | eBPF data pipeline: kernel probes -> collector -> SQLite time-series | ✅ 100% |
 | Step 2 | AI brain: feature engineering -> Isolation Forest -> XAI -> decision gate -> action engine + rollback + retraining | ✅ 100% |
-| Step 3 | Desktop app (5 tabs) + formal evaluation (P/R/F1) + demo rehearsal | ❌ 0% |
-| **Overall** | | **~65%** |
+| Step 3 | Desktop app (5 tabs + popups) + formal evaluation (P/R/F1, TTFD, FPR) | 🟡 ~90% |
+| **Overall** | | **~88%** |
 
 ---
 
 ## What Needs to Be Done Next (Priority Order)
 
-1. **[HIGH] Desktop App** — Build the Task-Manager UI (Electron recommended). Since the full backend is done, this is a pure UI task reading from SQLite. The 5 tabs are the core requirement.
-2. **[HIGH] Formal Evaluation** — Run the fault-injection suite end-to-end and compute P/R/F1, time-to-detection, and false-positive rate. Critical for demo credibility with judges.
-3. **[MEDIUM] IRQ Automated Action** — Currently IRQ anomalies only generate suggestions. Implementing safe kernel module reload would complete the 4th action type.
-4. **[MEDIUM] Demo Rehearsal** — Run all 4 demo scenarios end-to-end without manual intervention and fix any rough edges.
-5. **[LOW] libbpf / CO-RE port** — Port bpftrace scripts to native libbpf + BPF CO-RE for portability across kernel versions. Not required for the hackathon build.
+1. **[HIGH] Live-VM evaluation numbers** — run `sudo bash
+   step1/scripts/run_experiment.sh` + `step3/scripts/evaluate.py --db
+   step1/data/experiment.db` on the VMware deployment to replace the synthetic
+   evidence table with hardware-accurate numbers (harness is ready, no code
+   change required).
+2. **[MEDIUM] Commit `step3/` + `UI_Testing.md`** — the entire Step 3 work is
+   still untracked in git and should be committed.
+3. **[MEDIUM] Demo rehearsal polish** — rehearse the 4-terminal demo
+   (collector → UI → brain → fault injector) back-to-back and fix any rough
+   edges; verify tray popups appear on the target desktop session.
+4. **[LOW] IRQ automated action** — implement safe kernel-module reload to
+   complete the 4th action class (currently suggestion-only).
+5. **[LOW] libbpf / CO-RE port** — port bpftrace scripts to native libbpf +
+   CO-RE for kernel-version portability. Not required for the hackathon build.
 
 ---
 
@@ -295,9 +343,11 @@ Technology choice not yet made: Electron (web stack) vs Python/Qt.
 SElf-Healing-OS/
 ├── README.md
 ├── .gitignore
+├── requirements.txt                    # runtime dependencies
 ├── AI_Self_Healing_OS.md                  # Full design document
 ├── Self_Healing_OS_Implementation_Plan.md # Detailed 3-step build plan
 ├── PROGRESS.md                            # This file
+├── UI_Testing.md                          # Frontend + integration handoff
 │
 ├── step1/                                 (DATA PIPELINE — Complete)
 │   ├── bpftrace/
@@ -309,23 +359,34 @@ SElf-Healing-OS/
 │   ├── src/
 │   │   ├── collector.py                   # Userspace bpftrace -> SQLite collector
 │   │   └── db.py                          # SQLite schema + insert helpers
-│   └── scripts/
-│       ├── loadgen.py                     # Controlled load generator
-│       └── run_experiment.sh              # Experiment runner
+│   ├── scripts/
+│   │   ├── loadgen.py                     # Controlled load generator
+│   │   └── run_experiment.sh              # Experiment runner (+ __phase__ markers)
+│   └── data/                              # Runtime SQLite DBs (gitignored)
 │
-└── step2/                                 (AI BRAIN — Complete)
+├── step2/                                 (AI BRAIN — Complete)
+│   ├── src/
+│   │   ├── brain.py                       # Main orchestrator (replay + live loop)
+│   │   ├── feature_engine.py              # 108-dim feature vector per 5s window
+│   │   ├── model.py                       # Isolation Forest + Retrainer (+ validation gate)
+│   │   ├── trend.py                       # Linear trend / early-warning layer
+│   │   ├── explain.py                     # Native + SHAP XAI + NL templates + similarity
+│   │   ├── action_engine.py               # renice / ionice / restart + rollback
+│   │   └── config.py                      # All hyperparameters in one place
+│   ├── scripts/
+│   │   ├── fault_inject.py                # CPU / memory / I/O fault injectors
+│   │   ├── run_brain.py                   # CLI entry point
+│   │   └── run_e2e_demo.py                # End-to-end demo script
+│   └── tests/
+│       └── test_step2.py                  # 21 tests covering all Step 2 exit criteria
+│
+└── step3/                                 (OBSERVABILITY + EVALUATION — ~90%)
     ├── src/
-    │   ├── brain.py                       # Main orchestrator (replay + live loop)
-    │   ├── feature_engine.py              # 108-dim feature vector per 5s window
-    │   ├── model.py                       # Isolation Forest + Retrainer
-    │   ├── trend.py                       # Linear trend / early-warning layer
-    │   ├── explain.py                     # Native + SHAP XAI + NL templates + similarity
-    │   ├── action_engine.py               # renice / ionice / restart + rollback
-    │   └── config.py                      # All hyperparameters in one place
+    │   └── app.py                         # PyQt6 + pyqtgraph 5-tab dashboard + popups
     ├── scripts/
-    │   ├── fault_inject.py                # CPU / memory / I/O fault injectors
-    │   ├── run_brain.py                   # CLI entry point
-    │   └── run_e2e_demo.py                # End-to-end demo script
-    └── tests/
-        └── test_step2.py                  # 20 tests covering all Step 2 exit criteria
+    │   └── evaluate.py                    # P/R/F1, time-to-detection, FPR harness
+    ├── results/
+    │   └── eval_results.json              # Generated evaluation numbers
+    ├── EVALUATION.md                      # Methodology + results table
+    └── assets/                            # (icon/asset dir)
 ```
