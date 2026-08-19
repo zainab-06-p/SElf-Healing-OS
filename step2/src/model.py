@@ -124,23 +124,60 @@ class Retrainer:
     def __init__(self, cfg_=None):
         self.cfg = cfg_ or cfg
 
+    @staticmethod
+    def _flag_rate(model, X):
+        """Fraction of windows X the IsolationForest labels anomalous.
+
+        Used only for the cry-wolf check (how often a *known-normal* holdout
+        is flagged). For measuring detection of known incidents use
+        `_would_detect` instead: in the full 108-dim space a severe fault
+        concentrated in a few features can be scored *less* anomalous than
+        plain normal windows (isolation masking), so raw predict() labels
+        systematically under-count the incidents the brain would still catch
+        via the magnitude gate.
+        """
+        if len(X) == 0:
+            return 0.0
+        return float(np.mean(model.predict(np.asarray(X, dtype=float)) == -1))
+
+    @staticmethod
+    def _would_detect(model, x):
+        """True if the brain's own decision gate would flag window x.
+
+        Mirrors `Brain._gate`'s per-window signals (percentile confidence and
+        per-feature z deviation over the core `cur` metrics) so the retrain
+        gate measures detection exactly the way live detection does - not via
+        predict() labels, which are unreliable in the 108-dim feature space.
+        """
+        conf = model.confidence(x)
+        mag = model.deviation(x)
+        if mag >= model.cfg.MAG_SUGGEST:
+            return True
+        return conf >= model.cfg.SUGGEST_CONF and mag >= model.cfg.MAG_CONFIRM
+
+    def _detect_rate(self, model, X):
+        if len(X) == 0:
+            return 0.0
+        hits = sum(1 for x in np.atleast_2d(X) if self._would_detect(model, x))
+        return hits / len(X)
+
     def validate(self, model, X_holdout, X_anomalous=None):
         """Return (flag_rate, accepted, reason) for a candidate model.
 
         Rejects candidates that flag too many known-normal held-out windows
         (cries wolf) or that fail to detect the system's own past incidents
-        (degenerate - would stop self-healing). Flagging 0% of normal held-out
-        windows is healthy and is therefore accepted.
+        under the brain's own decision gate (degenerate - would stop
+        self-healing). Flagging 0% of normal held-out windows is healthy and
+        is therefore accepted.
         """
         if len(X_holdout) == 0:
             return 0.0, False, "no held-out windows available"
-        pred = model.predict(X_holdout)
-        flag_rate = float(np.mean(pred == -1))
+        flag_rate = self._flag_rate(model, X_holdout)
         hi = self.cfg.VALIDATE_MAX_FLAG
         if flag_rate > hi:
             return flag_rate, False, f"flag rate {flag_rate:.3f} too high (> {hi})"
         if X_anomalous is not None and len(X_anomalous) > 0:
-            det_rate = float(np.mean(model.predict(X_anomalous) == -1))
+            det_rate = self._detect_rate(model, X_anomalous)
             lo_det = self.cfg.VALIDATE_MIN_DETECT
             if det_rate < lo_det:
                 return flag_rate, False, (

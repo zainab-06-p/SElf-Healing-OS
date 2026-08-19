@@ -131,15 +131,26 @@ class Explainer:
         baseline = float(model.feature_means[idx])
         std = float(model.feature_stds[idx])
         scale = max(abs(value), abs(baseline), 1e-9)
+        def _fmt(v):
+            return "0" if v == 0 else f"{v:.0f}"
         if abs(value - baseline) < 0.01 * scale:
-            return f"{label} is near its baseline ({value:.0f} vs {baseline:.0f})"
-        if abs(baseline) > 0.01 * scale:
-            ratio = value / baseline if baseline else 0.0
-            return f"{label} is {ratio:.1f}x its baseline ({value:.0f} vs {baseline:.0f})"
+            return f"{label} is near its baseline ({_fmt(value)} vs {_fmt(baseline)})"
+        # "Xx its baseline" is only meaningful when both sides are clearly
+        # positive (a count/rate/duration). Trend/slope and residual features
+        # are signed, and near-zero baselines produce nonsense ratios such as
+        # "36x its baseline (-0 vs -0)", so use a directional deviation there.
+        if baseline > 0.0 and value > 0.0:
+            ratio = value / baseline
+            return f"{label} is {ratio:.1f}x its baseline ({_fmt(value)} vs {_fmt(baseline)})"
         if std > 1e-9:
             z = (value - baseline) / std
-            return f"{label} is {z:.1f} std above its baseline (now {value:.0f}, baseline {baseline:.0f})"
-        return f"{label} rose to {value:.0f} from a baseline of {baseline:.0f}"
+            direction = "above" if z >= 0 else "below"
+            return (
+                f"{label} is {abs(z):.1f} std {direction} its baseline "
+                f"(now {_fmt(value)}, baseline {_fmt(baseline)})"
+            )
+        kind = "rose to" if value > baseline else "fell to"
+        return f"{label} {kind} {_fmt(value)} from a baseline of {_fmt(baseline)}"
 
     def explain(self, model, x, confidence):
         """Return (natural_language, top_features) for a flagged window.

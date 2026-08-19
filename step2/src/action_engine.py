@@ -60,11 +60,15 @@ def classify_condition(driver_feature):
 
 
 def find_target_pid(marker):
-    """Return the pid of the first process whose argv contains `marker` as an
-    exact element (fault-inject processes are launched as
-    `python3 fault_inject.py --role shos_... --child`). Exact-element matching
-    avoids false hits on shells whose command line merely mentions the marker.
+    """Return the pid of the process the recovery action should act on.
+
+    Fault-inject roles run as a manager that spawns a ``--child`` process which
+    actually runs the workload; both argv lines contain the ``shos_*`` marker.
+    The child must be preferred so actions hit the real workload: acting on the
+    manager would leave the busy loop running (renice) or orphan a still-leaking
+    process (restart).
     """
+    fallback = None
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
@@ -73,9 +77,13 @@ def find_target_pid(marker):
                 argv = f.read().split(b"\x00")
         except (OSError, FileNotFoundError):
             continue
-        if marker.encode() in argv:
+        if marker.encode() not in argv:
+            continue
+        if b"--child" in argv:
             return int(pid)
-    return None
+        if fallback is None:
+            fallback = int(pid)
+    return fallback
 
 
 class Action:

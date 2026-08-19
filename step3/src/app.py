@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 import sqlite3
 from collections import deque
 from datetime import datetime
@@ -415,22 +416,43 @@ class MainWindow(QMainWindow):
             conn.close()
 
             if latest:
-                score = min(int(latest[0]), 100)
-                explanation = str(latest[1])
-                action = str(latest[2])
+                score, explanation, action_json, outcome = latest
+                # The DB stores the raw isolation-forest anomaly score (a
+                # small float around zero), not a 0-100 percentage - using
+                # int(score) always yielded 0, so the panel reset to "No
+                # anomalies detected" even while incidents existed. The brain
+                # writes the percentile confidence (0-1) into the action_taken
+                # metadata, so drive the severity bar and thresholds from that.
+                conf_pct = None
+                action_txt = "None required"
+                try:
+                    meta = json.loads(action_json) if action_json else {}
+                    if meta.get("confidence") is not None:
+                        conf_pct = min(100, int(float(meta["confidence"]) * 100))
+                    action_name = meta.get("action")
+                    if action_name:
+                        pid = meta.get("target_pid")
+                        action_txt = f"{action_name} (PID {pid})" if pid else str(action_name)
+                    elif meta.get("reason"):
+                        action_txt = f"Monitoring only ({meta['reason']})"
+                except (TypeError, ValueError):
+                    pass
+                if conf_pct is None:
+                    # No metadata to parse - an incident exists, so at minimum
+                    # surface it as a warning rather than falsely showing NORMAL.
+                    conf_pct = 50 if outcome else 0
 
-                self.anomaly_bar.setValue(score)
-                self.xai_text.setText(explanation)
+                self.anomaly_bar.setValue(conf_pct)
+                self.xai_text.setText(str(explanation or ""))
+                self.suggestion_label.setText(f"Suggested Recovery Action: {action_txt}")
 
-                if score > 70:
+                if conf_pct >= 70:
                     self.status_label.setText("System State: CRITICAL / ANOMALY DETECTED")
                     self.status_label.setStyleSheet("color: red;")
-                    self.suggestion_label.setText(f"Suggested Recovery Action: {action}")
                     self.btn_manual_action.setEnabled(True)
-                elif score > 30:
+                elif conf_pct >= 30:
                     self.status_label.setText("System State: WARNING / ELEVATED LATENCY")
                     self.status_label.setStyleSheet("color: orange;")
-                    self.suggestion_label.setText(f"Suggested Recovery Action: {action}")
                     self.btn_manual_action.setEnabled(True)
                 else:
                     self._reset_ai_panel_to_normal()
