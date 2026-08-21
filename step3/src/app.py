@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import sqlite3
+import argparse
 from collections import deque
 from datetime import datetime
 
@@ -9,12 +10,20 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, 
     QVBoxLayout, QHBoxLayout, QLabel, QStatusBar, 
-    QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
+    QTableWidget, QTableWidgetItem, QHeaderView,
     QProgressBar, QGroupBox, QTextEdit, QPushButton, QMessageBox,
     QRadioButton, QSlider, QSystemTrayIcon, QStyle, QPlainTextEdit,
+    QFrame, QScrollArea, QGridLayout,
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QColor, QFont
+
+# Modern dark theme (pure presentation - see theme.py)
+from theme import (
+    STYLE_SHEET, ACCENT, OK_TEXT, OK_BAR, TEXT_DIM,
+    style_chart, severity_palette, progress_bar_qss,
+    subsystem_color, unit_for, humanize, rgba, friendly_name,
+)
 
 # pyqtgraph powers the live chart tab. It is intentionally optional: without
 # it the rest of the dashboard still works and the missing dependency is called
@@ -26,19 +35,121 @@ except ImportError:
     pg = None
     HAS_PYQTGRAPH = False
 
+if HAS_PYQTGRAPH:
+    pg.setConfigOptions(antialias=True)
+
 # Database path
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../step1/data/self_healing_os.db'))
+
+# ---------------------------------------------------------------------------
+# MetricCard: Task-Manager-style live mini-chart for a single metric
+# ---------------------------------------------------------------------------
+if HAS_PYQTGRAPH:
+
+    class MetricCard(QFrame):
+        """One self-contained live chart card with a rolling 60s window."""
+
+        WINDOW = 60  # seconds visible
+
+        def __init__(self, name, parent=None):
+            super().__init__(parent)
+            self.metric_name = name
+            self.unit = unit_for(name)
+            self.color = subsystem_color(name)
+
+            self.setObjectName("metricCard")
+            lay = QVBoxLayout(self)
+            lay.setContentsMargins(14, 10, 14, 10)
+            lay.setSpacing(4)
+
+            # title row
+            top = QHBoxLayout()
+            top.setSpacing(8)
+            title = QLabel(friendly_name(name))
+            title.setObjectName("metricTitle")
+            title.setMinimumWidth(100)
+            title.setToolTip(name)
+            badge = QLabel(self.unit)
+            badge.setStyleSheet(
+                f"color: {self.color}; background-color: {rgba(self.color, 0.12)};"
+                f"border:1px solid {rgba(self.color, 0.35)}; border-radius:9px;"
+                f"padding:2px 8px; font-size:10px; font-weight:700;"
+            )
+            top.addWidget(title)
+            top.addStretch()
+            top.addWidget(badge)
+            lay.addLayout(top)
+
+            # big current value
+            self.value_label = QLabel("—")
+            self.value_label.setObjectName("metricValue")
+            lay.addWidget(self.value_label)
+
+            # plot
+            self.plot = pg.PlotWidget(background=None)
+            style_chart(self.plot)
+            self.plot.setMouseEnabled(x=False, y=False)
+            self.plot.hideButtons()
+            self.plot.setFixedHeight(130)
+            self.plot.getPlotItem().setMenuEnabled(False)
+            self.plot.setXRange(-self.WINDOW, 0, padding=0)
+            self.plot.enableAutoRange(x=False, y=True)
+
+            c = QColor(self.color)
+            fill_c = QColor(c); fill_c.setAlpha(38)
+            pen = pg.mkPen(color=self.color, width=2)
+            self.curve = self.plot.plot(
+                [], [], pen=pen,
+                fillLevel=0, brush=pg.mkBrush(fill_c),
+                symbol="o", symbolSize=3,
+                symbolBrush=pg.mkBrush(self.color),
+                symbolPen=pg.mkPen((0, 0, 0, 0)),
+            )
+            lay.addWidget(self.plot)
+
+        def update_data(self, timestamps, values):
+            if not values:
+                return
+            latest = timestamps[-1]
+            x = [t - latest for t in timestamps]
+            self.curve.setData(x, values)
+            self.value_label.setText(humanize(values[-1], self.unit))
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Self-Healing OS — Observability & Autonomous Healing Console")
-        self.resize(1100, 750)
+        self.resize(1280, 800)
+        self.setMinimumSize(1024, 680)
+
+        # ── header bar + tabs container ──
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("topBar")
+        bar_lay = QHBoxLayout(top_bar)
+        bar_lay.setContentsMargins(20, 10, 20, 10)
+        title_lbl = QLabel("Self-Healing OS")
+        title_lbl.setObjectName("appTitle")
+        sub_lbl = QLabel("Observability & Autonomous Healing Console")
+        sub_lbl.setObjectName("appSubtitle")
+        self.live_pill = QLabel("● MONITORING")
+        self.live_pill.setObjectName("livePill")
+        bar_lay.addWidget(title_lbl)
+        bar_lay.addWidget(sub_lbl)
+        bar_lay.addStretch()
+        bar_lay.addWidget(self.live_pill)
+        outer.addWidget(top_bar)
 
         # Main Tab Widget
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        outer.addWidget(self.tabs)
+        self.setCentralWidget(container)
 
         # Initialize the 5 required tabs
         self.tab_live = QWidget()
@@ -70,24 +181,55 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         
-        # Setup Auto-Refresh Timer (Refreshes every 2 seconds)
+        # Setup Auto-Refresh Timer (Refreshes every 1 second)
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._refresh_all_data)
-        self.refresh_timer.start(2000) 
+        self.refresh_timer.start(1000) 
 
         # Initial fetch immediately on startup
         self._refresh_all_data() 
 
+    def _style_table(self, table):
+        """Shared modern look for data tables (presentation only)."""
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(False)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.verticalHeader().setVisible(False)
+
     def _init_live_tab(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
         header = QLabel("Real-Time eBPF Metrics Stream")
-        header.setFont(QFont("Sans", 14, QFont.Weight.Bold))
+        header.setObjectName("pageHeader")
         layout.addWidget(header)
+
+        # ── stat cards row ──
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(12)
+        self.stat_cards = {}
+        for caption in ("Events captured", "Active sources", "Busiest source"):
+            frame = QFrame()
+            frame.setObjectName("statCard")
+            fl = QVBoxLayout(frame)
+            fl.setContentsMargins(16, 12, 16, 12)
+            fl.setSpacing(4)
+            val = QLabel("—")
+            val.setObjectName("statValue")
+            cap = QLabel(caption)
+            cap.setObjectName("statCaption")
+            fl.addWidget(val)
+            fl.addWidget(cap)
+            stats_row.addWidget(frame)
+            self.stat_cards[caption] = val
+        stats_row.addStretch()
+        layout.addLayout(stats_row)
 
         self.live_table = QTableWidget()
         self.live_table.setColumnCount(4)
         self.live_table.setHorizontalHeaderLabels(["Timestamp", "Metric Name", "Source (PID/Dev/IRQ)", "Value"])
-        
+        self._style_table(self.live_table)
+
         header_view = self.live_table.horizontalHeader()
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -99,37 +241,38 @@ class MainWindow(QMainWindow):
 
     def _init_metrics_tab(self):
         layout = QVBoxLayout()
-        control_layout = QHBoxLayout()
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
         header = QLabel("Time-Series Visualization")
-        header.setFont(QFont("Sans", 14, QFont.Weight.Bold))
-        
-        self.metric_selector = QComboBox()
-        self.metric_selector.addItem("Loading metrics...")
-        self.metric_selector.currentTextChanged.connect(self._force_plot_refresh)
-        
-        control_layout.addWidget(header)
-        control_layout.addStretch()
-        control_layout.addWidget(QLabel("Select Metric:"))
-        control_layout.addWidget(self.metric_selector)
-        
-        layout.addLayout(control_layout)
+        header.setObjectName("pageHeader")
+
+        sub = QLabel("Live · rolling 60 s window · auto-refresh 1 s")
+        sub.setObjectName("pageSubtitle")
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(header)
+        top_row.addStretch()
+        top_row.addWidget(sub)
+        layout.addLayout(top_row)
 
         if HAS_PYQTGRAPH:
-            self.plot_widget = pg.PlotWidget(background='w')
-            self.plot_widget.setTitle("Metric Trend (Last 60 Seconds)", color='k', size='12pt')
-            self.plot_widget.setLabel('left', 'Value', color='k')
-            self.plot_widget.setLabel('bottom', 'Time (Seconds Ago)', color='k')
-            self.plot_widget.showGrid(x=True, y=True)
+            self._metric_cards = {}
+            self._metrics_built = False
 
-            pen = pg.mkPen(color=(0, 114, 178), width=2)
-            self.plot_line = self.plot_widget.plot([], [], pen=pen, symbol='o', symbolSize=4, symbolBrush='b')
+            host = QWidget()
+            host.setStyleSheet("background:transparent;")
+            self._metrics_grid = QGridLayout(host)
+            self._metrics_grid.setSpacing(12)
+            self._metrics_grid.setContentsMargins(0, 0, 0, 0)
 
-            layout.addWidget(self.plot_widget)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(host)
+            scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}")
+            layout.addWidget(scroll)
         else:
-            self.plot_widget = None
-            self.plot_line = None
             missing = QLabel(
-                "📈 pyqtgraph is not installed, so live charts are unavailable.\n\n"
+                "pyqtgraph is not installed, so live charts are unavailable.\n\n"
                 "Install it to enable real-time plotting:\n"
                 "    pip install pyqtgraph\n\n"
                 "The Live View, Incident History, AI Insights and Controls tabs "
@@ -140,12 +283,13 @@ class MainWindow(QMainWindow):
             layout.addWidget(missing)
 
         self.tab_metrics.setLayout(layout)
-        self.metrics_loaded = False
 
     def _init_history_tab(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
         header = QLabel("Incident & Action Audit Log")
-        header.setFont(QFont("Sans", 14, QFont.Weight.Bold))
+        header.setObjectName("pageHeader")
         layout.addWidget(header)
 
         self.history_table = QTableWidget()
@@ -153,6 +297,7 @@ class MainWindow(QMainWindow):
         self.history_table.setHorizontalHeaderLabels([
             "ID", "Time", "Score", "Explanation (XAI)", "Action Taken", "Outcome", "Rollback?"
         ])
+        self._style_table(self.history_table)
         
         header_view = self.history_table.horizontalHeader()
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -164,24 +309,27 @@ class MainWindow(QMainWindow):
 
     def _init_ai_tab(self):
         layout = QVBoxLayout()
-        
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+
         header = QLabel("AI Decision Gate & Explainability (XAI)")
-        header.setFont(QFont("Sans", 14, QFont.Weight.Bold))
+        header.setObjectName("pageHeader")
         layout.addWidget(header)
 
         # 1. Anomaly Gauge Box
         gauge_box = QGroupBox("Current Threat & Anomaly Level")
         gauge_layout = QVBoxLayout()
-        
+
         self.status_label = QLabel("System State: NORMAL")
         self.status_label.setFont(QFont("Sans", 12, QFont.Weight.Bold))
-        self.status_label.setStyleSheet("color: green;")
-        
+        self.status_label.setStyleSheet(f"color: {OK_TEXT};")
+
         self.anomaly_bar = QProgressBar()
         self.anomaly_bar.setRange(0, 100)
         self.anomaly_bar.setValue(0)
         self.anomaly_bar.setTextVisible(True)
         self.anomaly_bar.setFormat("Anomaly Score: %v / 100")
+        self.anomaly_bar.setStyleSheet(progress_bar_qss(OK_BAR))
         
         gauge_layout.addWidget(self.status_label)
         gauge_layout.addWidget(self.anomaly_bar)
@@ -209,8 +357,10 @@ class MainWindow(QMainWindow):
         self.suggestion_label.setFont(QFont("Sans", 11))
         
         self.btn_manual_action = QPushButton("⚡ Execute Suggested Healing Action Now")
+        self.btn_manual_action.setObjectName("primaryButton")
         self.btn_manual_action.setFont(QFont("Sans", 10, QFont.Weight.Bold))
         self.btn_manual_action.setEnabled(False)
+        self.btn_manual_action.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_manual_action.clicked.connect(self._on_manual_action_clicked)
         
         gate_layout.addWidget(self.suggestion_label)
@@ -223,8 +373,10 @@ class MainWindow(QMainWindow):
 
     def _init_settings_tab(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
         header = QLabel("System Configuration & Controls")
-        header.setFont(QFont("Sans", 14, QFont.Weight.Bold))
+        header.setObjectName("pageHeader")
         layout.addWidget(header)
 
         # 1. Mode Selection
@@ -263,6 +415,7 @@ class MainWindow(QMainWindow):
         notif_box = QGroupBox("Real-Time Notifications")
         notif_layout = QVBoxLayout()
         self.notifications_feed = QPlainTextEdit()
+        self.notifications_feed.setObjectName("notificationsFeed")
         self.notifications_feed.setReadOnly(True)
         self.notifications_feed.setPlaceholderText(
             "No notifications yet. Newly detected anomalies and healing outcomes "
@@ -277,6 +430,8 @@ class MainWindow(QMainWindow):
         db_layout = QVBoxLayout()
         
         self.btn_clear_history = QPushButton("🗑️ Clear Incident History Table")
+        self.btn_clear_history.setObjectName("dangerButton")
+        self.btn_clear_history.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_clear_history.clicked.connect(self._clear_incident_history)
         
         db_layout.addWidget(self.btn_clear_history)
@@ -285,10 +440,6 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
         self.tab_settings.setLayout(layout)
-
-    def _force_plot_refresh(self, text):
-        if text and text != "Loading metrics...":
-            self._refresh_plot_data()
 
     def _refresh_all_data(self):
         self._refresh_live_data()
@@ -299,7 +450,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_live_data(self):
         if not os.path.exists(DB_PATH):
-            self.status_bar.showMessage(f"⚠️ Error: SQLite DB not found at {DB_PATH}")
+            self.status_bar.showMessage(f"Error: SQLite DB not found at {DB_PATH}")
             return
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -319,44 +470,67 @@ class MainWindow(QMainWindow):
                 val_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.live_table.setItem(row_idx, 3, val_item)
 
-            self.status_bar.showMessage(f"✅ System Status: Monitoring Active | Last Updated: {datetime.now().strftime('%H:%M:%S')}")
+            # update stat cards
+            from collections import Counter
+            sources = [str(r[2]) for r in rows if r[2]]
+            top_src = Counter(sources).most_common(1) if sources else [("—", 0)]
+            self.stat_cards["Events captured"].setText(str(len(rows)))
+            self.stat_cards["Active sources"].setText(str(len(set(sources))))
+            self.stat_cards["Busiest source"].setText(top_src[0][0][:18])
+
+            self.status_bar.showMessage(f"System Status: Monitoring Active | Last Updated: {datetime.now().strftime('%H:%M:%S')}")
         except sqlite3.Error as e:
-            self.status_bar.showMessage(f"⚠️ SQLite Error: {e}")
+            self.status_bar.showMessage(f"SQLite Error: {e}")
 
     def _refresh_plot_data(self):
-        if not HAS_PYQTGRAPH or self.plot_widget is None:
+        if not HAS_PYQTGRAPH or not os.path.exists(DB_PATH):
             return
-        if not os.path.exists(DB_PATH): return
         try:
             conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            
-            if not self.metrics_loaded:
-                cursor.execute("SELECT DISTINCT metric_name FROM metrics")
-                distinct_metrics = [row[0] for row in cursor.fetchall()]
-                if distinct_metrics:
-                    self.metric_selector.blockSignals(True)
-                    self.metric_selector.clear()
-                    self.metric_selector.addItems(distinct_metrics)
-                    self.metric_selector.blockSignals(False)
-                    self.metrics_loaded = True
+            cur = conn.cursor()
 
-            selected_metric = self.metric_selector.currentText()
-            if not selected_metric or selected_metric == "Loading metrics...":
+            # Discover metrics & build cards on first call
+            if not self._metrics_built:
+                cur.execute("SELECT DISTINCT metric_name FROM metrics ORDER BY metric_name")
+                all_names = [r[0] for r in cur.fetchall()]
+                if all_names:
+                    order = {"sched": 0, "mem": 1, "blk": 2, "irq": 3}
+                    all_names.sort(key=lambda n: (order.get(n.split("_", 1)[0], 9), n))
+                    cols = self._metrics_grid.columnCount()
+                    for idx, name in enumerate(all_names):
+                        card = MetricCard(name)
+                        r, c = divmod(idx, cols)
+                        self._metrics_grid.addWidget(card, r, c)
+                        self._metric_cards[name] = card
+                    self._metrics_built = True
+                else:
+                    conn.close()
+                    return
+
+            # Fetch last 65 s of all metrics in one query (anchored to latest
+            # timestamp in the DB so charts work for both live and historical data)
+            cur.execute("SELECT MAX(timestamp) FROM metrics")
+            latest = cur.fetchone()[0]
+            if latest is None:
                 conn.close()
                 return
-                
-            cursor.execute("SELECT timestamp, value FROM metrics WHERE metric_name = ? ORDER BY timestamp DESC LIMIT 100", (selected_metric,))
-            rows = cursor.fetchall()
+            cutoff = latest - 65
+            cur.execute(
+                "SELECT metric_name, timestamp, value FROM metrics WHERE timestamp >= ? ORDER BY timestamp ASC",
+                (cutoff,),
+            )
+            rows = cur.fetchall()
             conn.close()
 
-            if rows:
-                rows.reverse()
-                timestamps = [row[0] for row in rows]
-                values = [row[1] for row in rows]
-                latest_ts = timestamps[-1]
-                x_data = [(ts - latest_ts) for ts in timestamps] 
-                self.plot_line.setData(x_data, values)
+            buckets = {}
+            for m, ts, v in rows:
+                buckets.setdefault(m, ([], []))
+                buckets[m][0].append(ts)
+                buckets[m][1].append(v)
+
+            for name, card in self._metric_cards.items():
+                ts_list, vals = buckets.get(name, ([], []))
+                card.update_data(ts_list, vals)
 
         except sqlite3.Error as e:
             print(f"Plot refresh error: {e}")
@@ -391,9 +565,9 @@ class MainWindow(QMainWindow):
                 outcome_str = str(row[5])
                 outcome_item = QTableWidgetItem(outcome_str)
                 if outcome_str.lower() == 'resolved':
-                    outcome_item.setForeground(Qt.GlobalColor.darkGreen)
+                    outcome_item.setForeground(QColor("#34d399"))
                 elif outcome_str.lower() == 'failed':
-                    outcome_item.setForeground(Qt.GlobalColor.red)
+                    outcome_item.setForeground(QColor("#f87171"))
                 self.history_table.setItem(row_idx, 5, outcome_item)
                 
                 self.history_table.setItem(row_idx, 6, QTableWidgetItem(str(row[6])))
@@ -443,16 +617,18 @@ class MainWindow(QMainWindow):
                     conf_pct = 50 if outcome else 0
 
                 self.anomaly_bar.setValue(conf_pct)
+                bar_color = severity_palette(conf_pct)[1]
+                self.anomaly_bar.setStyleSheet(progress_bar_qss(bar_color))
                 self.xai_text.setText(str(explanation or ""))
                 self.suggestion_label.setText(f"Suggested Recovery Action: {action_txt}")
 
                 if conf_pct >= 70:
                     self.status_label.setText("System State: CRITICAL / ANOMALY DETECTED")
-                    self.status_label.setStyleSheet("color: red;")
+                    self.status_label.setStyleSheet(f"color: {severity_palette(conf_pct)[0]};")
                     self.btn_manual_action.setEnabled(True)
                 elif conf_pct >= 30:
                     self.status_label.setText("System State: WARNING / ELEVATED LATENCY")
-                    self.status_label.setStyleSheet("color: orange;")
+                    self.status_label.setStyleSheet(f"color: {severity_palette(conf_pct)[0]};")
                     self.btn_manual_action.setEnabled(True)
                 else:
                     self._reset_ai_panel_to_normal()
@@ -464,8 +640,9 @@ class MainWindow(QMainWindow):
 
     def _reset_ai_panel_to_normal(self):
         self.status_label.setText("System State: NORMAL")
-        self.status_label.setStyleSheet("color: green;")
+        self.status_label.setStyleSheet(f"color: {OK_TEXT};")
         self.anomaly_bar.setValue(5)
+        self.anomaly_bar.setStyleSheet(progress_bar_qss(OK_BAR))
         self.xai_text.setText("No anomalies detected. System metrics are within normal baseline thresholds.")
         self.suggestion_label.setText("Recommended Action: None required")
         self.btn_manual_action.setEnabled(False)
@@ -563,8 +740,32 @@ class MainWindow(QMainWindow):
             if old not in live_ids:
                 del self._seen_incidents[old]
 
-if __name__ == "__main__":
+def main():
+    """CLI entry point.  Accepts --db to override the SQLite database path."""
+    global DB_PATH
+
+    parser = argparse.ArgumentParser(
+        description="Self-Healing OS — Observability & Autonomous Healing Console",
+    )
+    parser.add_argument(
+        "--db",
+        default=DB_PATH,
+        help="Path to the SQLite database (default: step1/data/self_healing_os.db)",
+    )
+    args = parser.parse_args()
+    DB_PATH = os.path.abspath(args.db)
+
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    font = QFont()
+    font.setFamilies(["Inter", "SF Pro Display", "Segoe UI", "Ubuntu", "Noto Sans"])
+    font.setPointSize(10)
+    app.setFont(font)
+    app.setStyleSheet(STYLE_SHEET)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
