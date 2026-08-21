@@ -39,7 +39,7 @@ if HAS_PYQTGRAPH:
     pg.setConfigOptions(antialias=True)
 
 # Database path
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../step1/data/self_healing_os.db'))
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data_pipeline/data/self_healing_os.db'))
 
 # ---------------------------------------------------------------------------
 # MetricCard: Task-Manager-style live mini-chart for a single metric
@@ -750,7 +750,7 @@ def main():
     parser.add_argument(
         "--db",
         default=DB_PATH,
-        help="Path to the SQLite database (default: step1/data/self_healing_os.db)",
+        help="Path to the SQLite database (default: data_pipeline/data/self_healing_os.db)",
     )
     args = parser.parse_args()
     DB_PATH = os.path.abspath(args.db)

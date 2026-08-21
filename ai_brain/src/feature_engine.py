@@ -23,8 +23,8 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from step1.src import db  # noqa: E402
-from step2.src import config as cfg  # noqa: E402
+from data_pipeline.src import db  # noqa: E402
+from ai_brain.src import config as cfg  # noqa: E402
 
 
 def _subsystem_of(metric_name):

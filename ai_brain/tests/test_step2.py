@@ -3,7 +3,7 @@
 trend layer, explainability, decision gate, action engine, and the full
 replay/live pipeline - mapped to the Step 2 exit criteria in the plan.
 
-Run:  python3 -m pytest step2/tests/test_step2.py -q
+Run:  python3 -m pytest ai_brain/tests/test_step2.py -q
       (sudo python3 -m pytest ... -q   for the privileged action-cycle test)
 """
 
@@ -18,18 +18,18 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from step1.src import db  # noqa: E402
-from step2.src import config as cfg  # noqa: E402
-from step2.src.action_engine import (  # noqa: E402
+from data_pipeline.src import db  # noqa: E402
+from ai_brain.src import config as cfg  # noqa: E402
+from ai_brain.src.action_engine import (  # noqa: E402
     ActionEngine,
     classify_condition,
     find_target_pid,
 )
-from step2.src.brain import Brain  # noqa: E402
-from step2.src.explain import Explainer  # noqa: E402
-from step2.src.feature_engine import FeatureEngine  # noqa: E402
-from step2.src.model import AnomalyModel, Retrainer  # noqa: E402
-from step2.src.trend import TrendLayer  # noqa: E402
+from ai_brain.src.brain import Brain  # noqa: E402
+from ai_brain.src.explain import Explainer  # noqa: E402
+from ai_brain.src.feature_engine import FeatureEngine  # noqa: E402
+from ai_brain.src.model import AnomalyModel, Retrainer  # noqa: E402
+from ai_brain.src.trend import TrendLayer  # noqa: E402
 
 METRICS = [
     "sched_ctx_switches", "sched_preemptions", "sched_runq_lat_avg_us",
@@ -439,7 +439,7 @@ class TestPipeline:
         assert brain.model.model is not None
 
         hog = subprocess.Popen(
-            [sys.executable, "step2/scripts/fault_inject.py", "--role", "shos_cpuhog", "--child"],
+            [sys.executable, "ai_brain/scripts/fault_inject.py", "--role", "shos_cpuhog", "--child"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         try:
@@ -497,7 +497,7 @@ class TestPrivilegedActions:
         import subprocess
 
         p = subprocess.Popen(
-            [sys.executable, "step2/scripts/fault_inject.py", "--role", "shos_cpuhog", "--child"],
+            [sys.executable, "ai_brain/scripts/fault_inject.py", "--role", "shos_cpuhog", "--child"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         try:

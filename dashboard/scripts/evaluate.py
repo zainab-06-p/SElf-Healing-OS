@@ -8,8 +8,8 @@ Two modes:
 
   1. Live-data evaluation (preferred, run on the deployment VM as root):
 
-         sudo bash step1/scripts/run_experiment.sh    # writes experiment.db
-         python3 step3/scripts/evaluate.py --db step1/data/experiment.db
+         sudo bash data_pipeline/scripts/run_experiment.sh    # writes experiment.db
+         python3 dashboard/scripts/evaluate.py --db data_pipeline/data/experiment.db
 
      The harness reads the `__phase__` marker rows (metric_name='__phase__',
      value 0 = normal, 1 = fault) that run_experiment.sh writes into the
@@ -19,12 +19,12 @@ Two modes:
 
   2. Synthetic evaluation (works anywhere, no root/eBPF needed):
 
-         python3 step3/scripts/evaluate.py --synthetic [--fault cpu|memory|io]
+         python3 dashboard/scripts/evaluate.py --synthetic [--fault cpu|memory|io]
 
      Generates a labelled, realistic metrics corpus (controlled fault injection
      mirroring shos_cpuhog / shos_memleak / shos_iostress on top of a normal
      baseline), then runs the identical analysis. Used here to produce the
-     evidence table documented in step3/EVALUATION.md.
+     evidence table documented in dashboard/EVALUATION.md.
 
 Metrics reported (per the plan):
 
@@ -54,9 +54,9 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from step1.src import db  # noqa: E402
-from step2.src.brain import Brain  # noqa: E402
-from step2.src import config as cfg  # noqa: E402
+from data_pipeline.src import db  # noqa: E402
+from ai_brain.src.brain import Brain  # noqa: E402
+from ai_brain.src import config as cfg  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Synthetic corpus generation
@@ -290,7 +290,7 @@ def main():
     parser.add_argument("--synthetic", action="store_true",
                         help="generate a labelled synthetic fault-injection corpus and evaluate")
     parser.add_argument("--fault", choices=sorted(FAULT_EFFECTS) + ["all"], default="all")
-    parser.add_argument("--out", default=os.path.join(ROOT, "step3", "results", "eval_results.json"),
+    parser.add_argument("--out", default=os.path.join(ROOT, "dashboard", "results", "eval_results.json"),
                         help="path to write the results JSON")
     args = parser.parse_args()
 

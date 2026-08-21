@@ -16,7 +16,7 @@ def _ensure_desktop_entry():
         return
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    db_path = os.path.join(project_root, "step1", "data", "self_healing_os.db")
+    db_path = os.path.join(project_root, "data_pipeline", "data", "self_healing_os.db")
     shos_bin = os.path.expanduser("~/.local/bin/shos")
 
     # Only create if shos command exists (i.e. pip install was done)
@@ -48,7 +48,7 @@ def main():
 
     # Resolve the project root (one level up from this file)
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    step3_src = os.path.join(project_root, "step3", "src")
+    step3_src = os.path.join(project_root, "dashboard", "src")
 
     if step3_src not in sys.path:
         sys.path.insert(0, step3_src)

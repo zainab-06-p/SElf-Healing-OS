@@ -85,14 +85,14 @@ Self-Healing OS is an autonomous fault-detection and recovery system for Linux. 
 
 ## Features
 
-### Data Pipeline (Step 1)
+### Data Pipeline
 - **4 eBPF probes** — scheduler, memory, block I/O, interrupts
 - **In-kernel aggregation** via BPF maps (cheap, low overhead)
 - **Auto-recovering collector** — survives bpftrace crashes, restarts each subsystem independently
 - **SQLite WAL mode** — safe, fast writes for demo-scale workloads
 - **Device name decoding** — raw `dev_t` numbers converted to human-readable names
 
-### AI Brain (Step 2)
+### AI Brain
 - **108-dimensional feature vector** per 5-second window across 9 core metrics
 - **Isolation Forest** anomaly detection with continuous scoring (not just binary)
 - **Dual trigger gate** — both confidence (percentile) AND magnitude (per-feature sigma) can independently trigger
@@ -102,7 +102,7 @@ Self-Healing OS is an autonomous fault-detection and recovery system for Linux. 
 - **Auto-retraining** — every 200 new windows, retrains on sliding window of last 2000 normal windows with validation gate
 - **Safe actions** — renice / ionice / restart with pre-action snapshots, rate limiting, 30s monitoring window, and automatic rollback
 
-### Dashboard (Step 3)
+### Dashboard
 - **23 live metric charts** — Task-Manager-style scrolling graphs, one per metric
 - **Color-coded by subsystem** — cyan (scheduler), violet (memory), amber (disk), rose (IRQ)
 - **Proper units** — µs latency, KB/MB/GB bytes, event counts with K/M scaling
@@ -146,7 +146,7 @@ shos
 
 ```bash
 pip install -r requirements.txt
-python3 -m pytest step2/tests/test_step2.py -q   # run 21 tests
+python3 -m pytest ai_brain/tests/test_step2.py -q   # run 21 tests
 ```
 
 ---
@@ -157,16 +157,16 @@ Run on a Linux VM with root access:
 
 ```bash
 # Terminal 1 — The Senses (eBPF collector)
-sudo python3 step1/src/collector.py
+sudo python3 data_pipeline/src/collector.py
 
 # Terminal 2 — The Face (dashboard)
 shos
 
 # Terminal 3 — The Brain (AI orchestrator)
-sudo python3 step2/scripts/run_brain.py --db step1/data/self_healing_os.db
+sudo python3 ai_brain/scripts/run_brain.py --db data_pipeline/data/self_healing_os.db
 
 # Terminal 4 — The Chaos (fault injection)
-timeout 90s nice -n 15 python3 step2/scripts/fault_inject.py --role shos_cpuhog
+timeout 90s nice -n 15 python3 ai_brain/scripts/fault_inject.py --role shos_cpuhog
 ```
 
 **What you'll see:**
@@ -192,14 +192,14 @@ timeout 90s nice -n 15 python3 step2/scripts/fault_inject.py --role shos_cpuhog
 
 ```bash
 # Synthetic evaluation (no root needed)
-python3 step3/scripts/evaluate.py --synthetic
+python3 dashboard/scripts/evaluate.py --synthetic
 
 # Hardware evaluation (root required)
-sudo bash step1/scripts/run_experiment.sh
-python3 step3/scripts/evaluate.py --db step1/data/experiment.db
+sudo bash data_pipeline/scripts/run_experiment.sh
+python3 dashboard/scripts/evaluate.py --db data_pipeline/data/experiment.db
 ```
 
-Results: `step3/results/eval_results.json`
+Results: `dashboard/results/eval_results.json`
 
 ---
 
@@ -215,7 +215,7 @@ SElf-Healing-OS/
 │   ├── __init__.py
 │   └── launcher.py                   # Entry point for `shos` command
 │
-├── step1/                            # DATA PIPELINE
+├── data_pipeline/                    # DATA PIPELINE
 │   ├── bpftrace/                     # 4 eBPF probes + diagnostics
 │   │   ├── sched.bt                  # Scheduler (ctx switches, preemptions, run-queue)
 │   │   ├── memory.bt                 # Memory (page faults, OOM kills)
@@ -231,7 +231,7 @@ SElf-Healing-OS/
 │   └── data/
 │       └── self_healing_os.db        # SQLite database
 │
-├── step2/                            # AI BRAIN
+├── ai_brain/                         # AI BRAIN
 │   ├── src/
 │   │   ├── brain.py                  # Main orchestrator (replay + live loop)
 │   │   ├── feature_engine.py         # 108-dim feature vector per 5s window
@@ -247,7 +247,7 @@ SElf-Healing-OS/
 │   └── tests/
 │       └── test_step2.py             # 21 tests covering all exit criteria
 │
-└── step3/                            # OBSERVABILITY DASHBOARD
+└── dashboard/                        # OBSERVABILITY DASHBOARD
     ├── src/
     │   ├── app.py                    # PyQt6 main window (5 tabs)
     │   └── theme.py                  # Modern dark theme (QSS + helpers)

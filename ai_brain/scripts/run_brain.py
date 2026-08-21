@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from step2.src.brain import Brain  # noqa: E402
+from ai_brain.src.brain import Brain  # noqa: E402
 
 
 def main():

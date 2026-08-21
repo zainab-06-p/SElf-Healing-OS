@@ -10,8 +10,8 @@ Runs the full live pipeline against a seeded normal baseline:
 
 Usage (run as root, or it will re-invoke itself with sudo):
 
-    sudo python3 step2/scripts/run_e2e_demo.py [--db step2/data/demo.db]
-                    [--seed step1/data/self_healing_os.db]
+    sudo python3 ai_brain/scripts/run_e2e_demo.py [--db ai_brain/data/demo.db]
+                    [--seed data_pipeline/data/self_healing_os.db]
                     [--fault cpu|io|memory] [--fault-seconds 90]
 
 The demo polls SQLite and prints a phase timeline, then a final incident
@@ -30,9 +30,9 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-STEP1_COLLECTOR = os.path.join(ROOT, "step1", "src", "collector.py")
-STEP2_RUN_BRAIN = os.path.join(ROOT, "step2", "scripts", "run_brain.py")
-STEP2_FAULT = os.path.join(ROOT, "step2", "scripts", "fault_inject.py")
+STEP1_COLLECTOR = os.path.join(ROOT, "data_pipeline", "src", "collector.py")
+STEP2_RUN_BRAIN = os.path.join(ROOT, "ai_brain", "scripts", "run_brain.py")
+STEP2_FAULT = os.path.join(ROOT, "ai_brain", "scripts", "fault_inject.py")
 FAULT_MARKERS = {"cpu": "shos_cpuhog", "io": "shos_iostress", "memory": "shos_memleak"}
 
 SUDO = "SUDO_ASKPASS" not in os.environ
@@ -75,15 +75,15 @@ def wait_for(conn_path, sql, timeout, desc, poll=1.0):
 
 def brain_min_train():
     sys.path.insert(0, ROOT)
-    from step2.src import config as cfg
+    from ai_brain.src import config as cfg
 
     return cfg.MIN_TRAIN
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.path.join(ROOT, "step2", "data", "demo.db"))
-    ap.add_argument("--seed", default=os.path.join(ROOT, "step1", "data", "self_healing_os.db"))
+    ap.add_argument("--db", default=os.path.join(ROOT, "ai_brain", "data", "demo.db"))
+    ap.add_argument("--seed", default=os.path.join(ROOT, "data_pipeline", "data", "self_healing_os.db"))
     ap.add_argument("--fault", choices=list(FAULT_MARKERS), default="cpu")
     ap.add_argument("--nprocs", type=int, default=1,
                     help="number of concurrent fault processes (cpu: use 2 to "

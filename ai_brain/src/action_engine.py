@@ -27,9 +27,9 @@ from functools import partial
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from step2.src import config as cfg  # noqa: E402
+from ai_brain.src import config as cfg  # noqa: E402
 
-FAULT_INJECT_SCRIPT = os.path.join(ROOT, "step2", "scripts", "fault_inject.py")
+FAULT_INJECT_SCRIPT = os.path.join(ROOT, "ai_brain", "scripts", "fault_inject.py")
 
 CONDITION_ACTIONS = {
     "cpu": "renice",

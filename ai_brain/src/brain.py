@@ -23,13 +23,13 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from step1.src import db  # noqa: E402
-from step2.src import config as cfg  # noqa: E402
-from step2.src.action_engine import ActionEngine, classify_condition  # noqa: E402
-from step2.src.explain import Explainer  # noqa: E402
-from step2.src.feature_engine import FeatureEngine  # noqa: E402
-from step2.src.model import AnomalyModel, Retrainer  # noqa: E402
-from step2.src.trend import TrendLayer  # noqa: E402
+from data_pipeline.src import db  # noqa: E402
+from ai_brain.src import config as cfg  # noqa: E402
+from ai_brain.src.action_engine import ActionEngine, classify_condition  # noqa: E402
+from ai_brain.src.explain import Explainer  # noqa: E402
+from ai_brain.src.feature_engine import FeatureEngine  # noqa: E402
+from ai_brain.src.model import AnomalyModel, Retrainer  # noqa: E402
+from ai_brain.src.trend import TrendLayer  # noqa: E402
 
 
 class Brain:

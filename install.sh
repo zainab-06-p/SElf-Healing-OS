@@ -17,7 +17,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DB_PATH="${PROJECT_DIR}/step1/data/self_healing_os.db"
+DB_PATH="${PROJECT_DIR}/data_pipeline/data/self_healing_os.db"
 
 echo ""
 echo "  ╔══════════════════════════════════════════════╗"
@@ -69,7 +69,7 @@ AUTOSTART_DIR="${HOME}/.config/autostart"
 mkdir -p "$DESKTOP_DIR" "$AUTOSTART_DIR"
 
 # Copy a proper icon if one exists, otherwise use a system icon
-ICON_PATH="${PROJECT_DIR}/step3/assets/icon.png"
+ICON_PATH="${PROJECT_DIR}/dashboard/assets/icon.png"
 if [ ! -f "$ICON_PATH" ]; then
     ICON_PATH="utilities-terminal"
 fi
